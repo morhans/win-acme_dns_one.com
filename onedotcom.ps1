@@ -252,13 +252,15 @@ function onedotcom_login {
         [boolean]$AcceptTerms=$true
     )
 
+    $SearchString = '<form id="kc-form-login" class="Login-form login autofill" onsubmit="login.disabled = true; return true;" action="'
+
     #$odcCred = DecryptCred
 
     #$usr = $odcCred.UserName
     #$pwd = $odcCred.GetNetworkCredential().Password
 
-    $usr = "hostmaster@jumbogris.dk"
-    $pwd = "7zH%.!WbN@&uU*2"
+    $usr = 'hostmaster@jumbogris.dk'
+    $pwd = '7zH%.!WbN@&uU*2'
     
     if (([String]::IsNullOrWhiteSpace($usr)) -or ([String]::IsNullOrWhiteSpace($pwd)))  {
         throw "Login and/or password are not set correctly. Reissue with option setcred"
@@ -268,15 +270,18 @@ function onedotcom_login {
    
     try {
         $webrequest = Invoke-WebRequest -Uri $apiRoot -Method Default -SessionVariable websession -UseBasicParsing
-        Write-Host $webrequest
-        $form = $webrequest.Forms[0]
-        Write-Host $form
-        Write-Host $form.Fields
-        $form.Fields["user"]     = $usr
-        $form.Fields["password"] = $pwd
+        $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_before.txt"
+        $pos = $webrequest.content.LastIndexOf($SearchString) + $SearchString.Length 
+        $resulttxt = $webrequest.content.Substring($pos)
+        $pos = $resulttxt.IndexOf('"')
+        $LoginUrl = $resulttxt.Substring(0, $pos)
+        $LoginUrl = $LoginUrl.replace('&amp;','&')
+        $LoginUrl | Out-File -FilePath "C:\Users\Programmering\Desktop\output_login.txt"
+        $formFields = @{username=$usr;password=$pwd;credentialId=''}
 
-        #$webrequest = Invoke-WebRequest -Uri $form.Action -WebSession $websession -Method POST 
-        #$webrequest.StatusDescriptionOK
+        $webrequest = Invoke-WebRequest -Uri $LoginUrl -Body $formFields -WebSession $websession -Method POST -UseBasicParsing
+        $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_after.txt"
+        $webrequest.StatusDescriptionOK
         $StatusCode = $webrequest.StatusCode
     }
     catch {
