@@ -7,9 +7,9 @@
 #Version history:
 #1.0   : Initial version
 
-$global:apiRoot = 'https://www.one.com/admin/'
+$global:apiRoot = 'https://www.one.com/admin'
 
-function Add-DnsTxtGDNS {
+function Add-DnsRecord {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory,Position=0)]
@@ -18,33 +18,29 @@ function Add-DnsTxtGDNS {
         [string]$RecordName,
         [Parameter(Mandatory,Position=2)]
         [string]$TxtValue,
-        [Parameter(Mandatory=$false,Position=3)]
-        [boolean]$AcceptTerms=$true
+        [Parameter(Mandatory,Position=3)]
+        [object]$LoginSession
     )
 
-
-    $loginsess = gratisdns_login($AcceptTerms)
-
-    Write-Verbose "Attempting to find hosted zone for $Identifier"
-    $ZoneName = Find-GDNSZone $Identifier $loginsess
-    if ([String]::IsNullOrWhiteSpace($ZoneName)) {
-        throw "Unable to find zone for $Identifier"
-    }
+    #Write-Verbose "Attempting to find hosted zone for $Identifier"
+    #$ZoneName = Find-GDNSZone $Identifier $loginsess
+    #if ([String]::IsNullOrWhiteSpace($ZoneName)) {
+    #    throw "Unable to find zone for $Identifier"
+    #}
     
     # add the new TXT record
-    $url = "$apiRoot/?action=dns_primary_record_added_txt&user_domain=$ZoneName&name=$RecordName&txtdata=$txtvalue&ttl=1"
+    $PostData = @{"type":"dns_custom_records","attributes":{"priority":0,"ttl":600,"type":"TXT","prefix":$RecordName,"content":$TxtValue}}
+    $url = "$apiRoot/api/domains/$maindomain/dns/custom_records"
     Write-Verbose "Adding $RecordName with value $TxtValue to $ZoneName"
     try {    
-        $webrequest = Invoke-WebRequest -Uri $url -WebSession $loginsess -UseBasicParsing
+        $webrequest = Invoke-WebRequest -Uri $LoginUrl -Body $PostData -WebSession $LoginSession -Method POST -UseBasicParsing -ContentType "application/json"
         $StatusCode = $webrequest.StatusCode
     }
     catch {
         $StatusCode = $_.Exception.Response.StatusCode.value__
     }
     
-    #Check if add was a success
-    if (!($webrequest.content -like "*table-success*")) {
-        throw "Unable to create entry"
+    $webrequest | Out-File -FilePath "C:\Users\Programmering\Desktop\output_add.txt"
     }
 
 
@@ -169,7 +165,7 @@ function Check-GDNSTOC {
 
 }
 
-function Find-GDNSZone {
+function getCustomRecords {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory,Position=0)]
@@ -177,27 +173,26 @@ function Find-GDNSZone {
         [Parameter(Mandatory,Position=1)]
         [object]$LoginSess
     )
-
-    $url = "$apiRoot/?action=dns_primarydns"
+    
+    $pieces = $Identifier.Split(".")
+    for ($i=1; $i -lt ($pieces.Count-1); $i++) {
+        $topdomain = "$( $pieces[$i..($pieces.Count-1)] -join '.' )"
+    }
+    if (([String]::IsNullOrWhiteSpace($topdomain))) {
+        $topdomain = $Identifier
+    } 
+    $url = "$apiroot/api/domains/$topdomain/dns/custom_records"
+    Write-Host $url
     try {        
-        $webrequest = Invoke-WebRequest -Uri $url -WebSession $loginsess -UseBasicParsing
+        $webrequest = Invoke-WebRequest -Uri $url -Method Default -WebSession $LoginSess -UseBasicParsing
         $StatusCode = $webrequest.StatusCode
     }
     catch {
         $StatusCode = $_.Exception.Response.StatusCode.value__
     } 
-      
-    $pieces = $RecordName.Split('.')
-    for ($i=1; $i -lt ($pieces.Count-1); $i++) {
-        $topdomain = "$( $pieces[$i..($pieces.Count-1)] -join '.' )"
-    }
-    
-    if($webrequest.content -like "*$topdomain*") {
-        return $topdomain
-    }
-    else {
-        return $null
-    }
+    $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_records.txt"
+    $jsonObj = ConvertFrom-Json $webrequest.content
+    return $jsonObj.result.data
 }
 
 function Find-GDNSRecordId {
@@ -273,6 +268,12 @@ function onedotcom_login {
         $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_before.txt"
         $pos = $webrequest.content.LastIndexOf($SearchString) + $SearchString.Length 
         $resulttxt = $webrequest.content.Substring($pos)
+    }
+    catch {
+        $StatusCode = $_.Exception.Response.StatusCode.value__
+    }
+
+    try { 
         $pos = $resulttxt.IndexOf('"')
         $LoginUrl = $resulttxt.Substring(0, $pos)
         $LoginUrl = $LoginUrl.replace('&amp;','&')
@@ -281,40 +282,20 @@ function onedotcom_login {
 
         $webrequest = Invoke-WebRequest -Uri $LoginUrl -Body $formFields -WebSession $websession -Method POST -UseBasicParsing
         $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_after.txt"
-        $webrequest.StatusDescriptionOK
-        $StatusCode = $webrequest.StatusCode
+        #$webrequest.StatusDescriptionOK
     }
     catch {
         $StatusCode = $_.Exception.Response.StatusCode.value__
     }
-    
-    if($webrequest.content -like "*table-danger*") {
-        throw "One.com login failed for user $usr"
-    }
-
-    if($webrequest.content -like "*You have not been accepting our terms*") {
-        if($AcceptTerms) {
-            $url = "$apiRoot/?approveterms=yes"
-            try {    
-                $webrequest = Invoke-WebRequest -Uri $url -WebSession $websession -UseBasicParsing
-                $StatusCode = $webrequest.StatusCode
-            }
-            catch {
-                $StatusCode = $_.Exception.Response.StatusCode.value__
-            }
-
-        }
-        else {
-            throw "GratisDNS ask for acceptence of terms for $usr. DeclineTerms option enabled."
-        }
-    }
-    
     Remove-Variable usr, pwd
 
     return $websession
 }
 
-onedotcom_login
+$zone = 'jumbogris.dk'
+$sess = onedotcom_login
+$RecObj = getCustomRecords $zone $sess
+Write-Output $RecObj | Out-Host
 
 <#
 $action = $args[0]
