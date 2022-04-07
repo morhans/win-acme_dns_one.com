@@ -22,46 +22,41 @@ function Add-DnsRecord {
         [object]$LoginSession
     )
 
-    #Write-Verbose "Attempting to find hosted zone for $Identifier"
-    #$ZoneName = Find-GDNSZone $Identifier $loginsess
-    #if ([String]::IsNullOrWhiteSpace($ZoneName)) {
-    #    throw "Unable to find zone for $Identifier"
-    #}
-    
     # add the new TXT record
-    $PostData = @{"type":"dns_custom_records","attributes":{"priority":0,"ttl":600,"type":"TXT","prefix":$RecordName,"content":$TxtValue}}
-    $url = "$apiRoot/api/domains/$maindomain/dns/custom_records"
-    Write-Verbose "Adding $RecordName with value $TxtValue to $ZoneName"
+
+    $PostData = @{type="dns_custom_records";attributes=@{priority=0;ttl=600;type="TXT";prefix=$RecordName;content=$TxtValue}}|ConvertTo-Json
+    $url = "$apiRoot/api/domains/$Identifier/dns/custom_records"
+    Write-Debug $url
+    Write-Verbose "Adding $RecordName with value $TxtValue to $Identifier"
     try {    
-        $webrequest = Invoke-WebRequest -Uri $LoginUrl -Body $PostData -WebSession $LoginSession -Method POST -UseBasicParsing -ContentType "application/json"
+        $webrequest = Invoke-WebRequest -Uri $url -Body $PostData -WebSession $LoginSession -Method POST -UseBasicParsing -ContentType "application/json"
         $StatusCode = $webrequest.StatusCode
     }
     catch {
         $StatusCode = $_.Exception.Response.StatusCode.value__
     }
     
-    $webrequest | Out-File -FilePath "C:\Users\Programmering\Desktop\output_add.txt"
-    }
-
+    #Check if adding was a success
+    $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_add.txt"
 
    <#
     .SYNOPSIS
-        Add a DNS TXT record to GratisDNS.
+        Add a DNS TXT record to One.com.
     .DESCRIPTION
-        Use GratisDNS api to add a TXT record to a GratisDNS DNS zone.
+        Use One.com api to add a TXT record to a One.com DNS zone.
     .PARAMETER Identifier
-        DNS name to be evaluated. 
+        DNS name to be added a TXT record. 
     .PARAMETER RecordName
         The fully qualified name of the TXT record.
     .PARAMETER TxtValue
         The value of the TXT record.
     .EXAMPLE
-        Add-DnsTxtExample 'example.com' '_acme-challenge.site1.example.com' 'asdfqwer12345678'
+        dd-DnsRecord 'example.com' '_acme-challenge.site1' 'asdfqwer12345678' '$SessionID'
         Adds a TXT record for the specified site with the specified value.
     #>
 }
 
-function Remove-DnsTxtGDNS {
+function Remove-DnsRecord {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory,Position=0)]
@@ -70,53 +65,46 @@ function Remove-DnsTxtGDNS {
         [string]$RecordName,
         [Parameter(Mandatory,Position=2)]
         [string]$TxtValue,
-        [Parameter(Mandatory=$false,Position=3)]
-        [boolean]$AcceptTerms=$true
+        [Parameter(Mandatory,Position=3)]
+        [object]$LoginSession
     )
 
-    $loginsess = gratisdns_login($AcceptTerms)
-    
-    Write-Verbose "Attempting to find hosted zone for $Identifier"
-    $ZoneName = Find-GDNSZone $Identifier $loginsess
-    if ([String]::IsNullOrWhiteSpace($ZoneName)) {
-        throw "Unable to find zone for $Identifier"
-    }
     
     # check for an existing record
-    $RecId = Find-GDNSRecordId $RecordName $TxtValue $loginsess
+    $RecId = Find-RecordId $Identifier $RecordName $TxtValue $LoginSession
     if ([String]::IsNullOrWhiteSpace($RecId)) {
         throw "Unable to find record id for $RecordName"
     }
 
     # remove the txt record if it exists
     Write-Verbose "Removing $RecordName with value $TxtValue from $Identifier"
-    $url = "$apiRoot/?action=dns_primary_delete_txt&user_domain=$ZoneName&id=$RecId"
+    $url = "$apiRoot/api/domains/$Identifier/dns/custom_records/$RecId"
     try {    
-        $webrequest = Invoke-WebRequest -Uri $url -WebSession $loginsess -UseBasicParsing
+        $webrequest = Invoke-WebRequest -Uri $url -WebSession $LoginSession -Method DELETE -UseBasicParsing -ContentType "application/json"
         $StatusCode = $webrequest.StatusCode
     }
     catch {
         $StatusCode = $_.Exception.Response.StatusCode.value__
     }
-
+    $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_del.txt"
     # Check if removal was a success
-    if (!($webrequest.content -like "*table-success*")) {
+    if (!($webrequest.content -eq '{"result":null,"metadata":null}')) {
         throw "Unable to delete entry"
     }
 
     <#
     .SYNOPSIS
-        Remove a DNS TXT record from GratisDNS.
+        Remove a DNS TXT record from One.com.
     .DESCRIPTION
-        Use GratisDNS api to remove a TXT record to a GratisDNS DNS zone.
+        Use One.com api to remove a TXT record to a One.com DNS zone.
     .PARAMETER Identifier
-        DNS name to be evaluated.
+        DNS name to have TXT record deleted.
     .PARAMETER RecordName
         The fully qualified name of the TXT record.
     .PARAMETER TxtValue
         The value of the TXT record.
     .EXAMPLE
-        Remove-DnsTxtExample 'example.com' '_acme-challenge.site1.example.com' 'asdfqwer12345678'
+        Remove-DnsTxtExample 'example.com' '_acme-challenge.site1' 'asdfqwer12345678' '$SessionID'
         Removes a TXT record for the specified site with the specified value.
     #>
 
@@ -125,16 +113,16 @@ function Remove-DnsTxtGDNS {
 function EncryptCred {
     
     #Ask for credentials
-    $Credential = Get-Credential -Message "Login and password for GratisDNS"
+    $Credential = Get-Credential -Message "Login and password for One.com"
 
     #Save credentials
-    $Credential | Export-CliXml -Path "${env:\userprofile}\GDNS.dat"
+    $Credential | Export-CliXml -Path "${env:\userprofile}\One.com.dat"
 
     <#
     .SYNOPSIS
-        Saves GratisDNS credentials to file.
+        Saves One.com credentials to file.
     .DESCRIPTION
-        Encrypt credentials to use on GratisDNS login. Credentials is only readable by the creating user.
+        Encrypt credentials to use on One.com login. Credentials is only readable by the creating user.
     #>
 
 }
@@ -143,27 +131,6 @@ function EncryptCred {
 ############################
 # Helper Functions
 ############################
-
-function Check-GDNSTOC {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$false,Position=0)]
-        [boolean]$autoaccept = $true,
-        [Parameter(Mandatory,Position=1)]
-        [object]$LoginSess
-    )
-    
-    try {        
-        $webrequest = Invoke-WebRequest -Uri $url -WebSession $loginsess -UseBasicParsing
-        $StatusCode = $webrequest.StatusCode
-    }
-    catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
-    } 
-    
-
-
-}
 
 function getCustomRecords {
     [CmdletBinding()]
@@ -195,37 +162,29 @@ function getCustomRecords {
     return $jsonObj.result.data
 }
 
-function Find-GDNSRecordId {
+function Find-RecordId {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory,Position=0)]
-        [string]$RecordName,
+        [string]$Identifier,
         [Parameter(Mandatory,Position=1)]
-        [object]$TxtValue,
+        [string]$RecordName,
         [Parameter(Mandatory,Position=2)]
+        [object]$TxtValue,
+        [Parameter(Mandatory,Position=3)]
         [object]$LoginSess
     )
 
-    $url = "$apiRoot/?action=dns_primary_changeDNSsetup&user_domain=$ZoneName"
-
-    try {    
-        $webrequest = Invoke-WebRequest -Uri $url -WebSession $loginsess -UseBasicParsing
-        $StatusCode = $webrequest.StatusCode
-    }
-    catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
-    }
-    
+    $RecObj = getCustomRecords $Identifier $LoginSess  
         
-    $tmpid = ForEach-Object { [regex]::matches( $webrequest.content, "<td>$([regex]::escape($RecordName))</td>\s*<td>$([regex]::escape($TxtValue))</td>[^?]*[^&]*&id=[^&]*" ) }
-    if ([String]::IsNullOrWhiteSpace($tmpid)) {
-        $id = $null
+    ForEach($rec in $RecObj) {
+        if ($rec.attributes.prefix -eq $RecordName -and $rec.attributes.content -eq $TxtValue -and $rec.attributes.type -eq "TXT") {
+            $RecId = $rec.id
+        }
+         
     }
-    else {
-        $id= $tmpid.Value.Substring($tmpid.Value.LastIndexOf('=')+1)
-    }
-    
-    return $id
+    Write-Debug "ID (Empty if not found): $RecId"
+    return $RecId
 }
 
 function DecryptCred {
@@ -241,11 +200,6 @@ function DecryptCred {
 }
 
 function onedotcom_login {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory=$false,Position=0)]
-        [boolean]$AcceptTerms=$true
-    )
 
     $SearchString = '<form id="kc-form-login" class="Login-form login autofill" onsubmit="login.disabled = true; return true;" action="'
 
@@ -292,10 +246,11 @@ function onedotcom_login {
     return $websession
 }
 
+
 $zone = 'jumbogris.dk'
 $sess = onedotcom_login
-$RecObj = getCustomRecords $zone $sess
-Write-Output $RecObj | Out-Host
+#Add-DnsRecord $zone "_acme-challenge.test" "tokenid" $Sess
+#Remove-DnsRecord $zone "_acme-challenge.test" "tokenid" $Sess
 
 <#
 $action = $args[0]
