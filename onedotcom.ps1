@@ -60,7 +60,7 @@ function Add-DnsRecord {
     }
     
     #Check if adding was a success
-    $Result = $webrequest.content | ConvertFrom-Json
+    $Result = ConvertFrom-Json $webrequest.content
     if ([String]::IsNullOrWhiteSpace($Result.result.data.id)) {
         throw "TXT record for $RecordName ws not added!"
     }
