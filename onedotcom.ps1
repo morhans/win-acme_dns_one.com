@@ -1,11 +1,33 @@
-#Author: Morten Hansen
-#
-#
-# Note: Script requires the credentials is set before add and remove functionality can be used.
-#       Do this by running the script with option setcred. 
-#
-#Version history:
-#1.0   : Initial version
+<#
+.SYNOPSIS
+    Adds and deletes TXT record to your one.com domain with win-wacs.
+.DESCRIPTION
+    Works with win-wacs to add and delete TXT records for use with Let's encrypt certificates.
+.NOTES
+    File Name   : onedotcom.ps1
+    Version     : 1.0 (Initial version)
+    Author      : Morten Hansen
+.LINK
+    https://github.com/morhans/win-acme_dns_one.com
+.EXAMPLE
+    onedotcom.ps1 create <Identifier> <RecordName> <Token>
+.EXAMPLE
+    onedotcom.ps1 delete <Identifier> <RecordName> <Token>
+.EXAMPLE
+    onedotcom.ps1 setcred
+#>
+
+[CmdletBinding()]
+    param(
+        [Parameter(Position=0)]
+        [string]$action,
+        [Parameter(Position=1)]
+        [string]$Identifier,
+        [Parameter(Position=2)]
+        [string]$RecordName,
+        [Parameter(Position=3)]
+        [string]$Token
+    )
 
 $global:apiRoot = 'https://www.one.com/admin'
 
@@ -23,21 +45,25 @@ function Add-DnsRecord {
     )
 
     # add the new TXT record
-
+    $topdomain = getTopDomain $Identifier
+    $RecordName = $RecordName.Substring(0,$RecordName.Length-$topdomain.Length-1)
     $PostData = @{type="dns_custom_records";attributes=@{priority=0;ttl=600;type="TXT";prefix=$RecordName;content=$TxtValue}}|ConvertTo-Json
-    $url = "$apiRoot/api/domains/$Identifier/dns/custom_records"
+    $url = "$apiRoot/api/domains/$topdomain/dns/custom_records"
     Write-Debug $url
     Write-Verbose "Adding $RecordName with value $TxtValue to $Identifier"
     try {    
-        $webrequest = Invoke-WebRequest -Uri $url -Body $PostData -WebSession $LoginSession -Method POST -UseBasicParsing -ContentType "application/json"
-        $StatusCode = $webrequest.StatusCode
+        $webrequest = Invoke-WebRequest -Uri $url -Body $PostData -WebSession $LoginSession -Method POST -UseBasicParsing -ContentType "application/json" -ErrorAction Stop
     }
-    catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
+    catch [System.Net.WebException] { 
+        Write-Verbose "An exception was caught: $($_.Exception.Message)"
+        $_.Exception.Response
     }
     
     #Check if adding was a success
-    $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_add.txt"
+    $Result = $webrequest.content | ConvertFrom-Json
+    if ([String]::IsNullOrWhiteSpace($Result.result.data.id)) {
+        throw "TXT record for $RecordName ws not added!"
+    }
 
    <#
     .SYNOPSIS
@@ -51,7 +77,7 @@ function Add-DnsRecord {
     .PARAMETER TxtValue
         The value of the TXT record.
     .EXAMPLE
-        dd-DnsRecord 'example.com' '_acme-challenge.site1' 'asdfqwer12345678' '$SessionID'
+        Add-DnsRecord 'example.com' '_acme-challenge.site1' 'asdfqwer12345678' '$SessionID'
         Adds a TXT record for the specified site with the specified value.
     #>
 }
@@ -68,28 +94,30 @@ function Remove-DnsRecord {
         [Parameter(Mandatory,Position=3)]
         [object]$LoginSession
     )
-
     
     # check for an existing record
-    $RecId = Find-RecordId $Identifier $RecordName $TxtValue $LoginSession
+    $topdomain = getTopDomain $Identifier
+    $RecordName = $RecordName.Substring(0,$RecordName.Length-$topdomain.Length-1)
+    $RecId = Find-RecordId $topdomain $RecordName $TxtValue $LoginSession
     if ([String]::IsNullOrWhiteSpace($RecId)) {
         throw "Unable to find record id for $RecordName"
     }
 
     # remove the txt record if it exists
     Write-Verbose "Removing $RecordName with value $TxtValue from $Identifier"
-    $url = "$apiRoot/api/domains/$Identifier/dns/custom_records/$RecId"
+    $url = "$apiRoot/api/domains/$topdomain/dns/custom_records/$RecId"
+    Write-Debug $url
     try {    
-        $webrequest = Invoke-WebRequest -Uri $url -WebSession $LoginSession -Method DELETE -UseBasicParsing -ContentType "application/json"
-        $StatusCode = $webrequest.StatusCode
+        $webrequest = Invoke-WebRequest -Uri $url -WebSession $LoginSession -Method DELETE -UseBasicParsing -ContentType "application/json" -ErrorAction Stop
     }
-    catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
+    catch [System.Net.WebException] { 
+        Write-Verbose "An exception was caught: $($_.Exception.Message)"
+        $_.Exception.Response
     }
-    $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_del.txt"
+
     # Check if removal was a success
     if (!($webrequest.content -eq '{"result":null,"metadata":null}')) {
-        throw "Unable to delete entry"
+        throw "Unable to delete record $RecordName!"
     }
 
     <#
@@ -104,7 +132,7 @@ function Remove-DnsRecord {
     .PARAMETER TxtValue
         The value of the TXT record.
     .EXAMPLE
-        Remove-DnsTxtExample 'example.com' '_acme-challenge.site1' 'asdfqwer12345678' '$SessionID'
+        Remove-DnsRecord Example 'example.com' '_acme-challenge.site1' 'asdfqwer12345678' '$SessionID'
         Removes a TXT record for the specified site with the specified value.
     #>
 
@@ -132,6 +160,23 @@ function EncryptCred {
 # Helper Functions
 ############################
 
+function getTopDomain {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory,Position=0)]
+        [string]$Identifier
+    )
+    
+    $pieces = $Identifier.Split(".")
+    for ($i=1; $i -lt ($pieces.Count-1); $i++) {
+        $topdomain = "$( $pieces[$i..($pieces.Count-1)] -join '.' )"
+    }
+    if (([String]::IsNullOrWhiteSpace($topdomain))) {
+        $topdomain = $Identifier
+    }
+
+    return $topdomain
+}
 function getCustomRecords {
     [CmdletBinding()]
     param(
@@ -141,23 +186,15 @@ function getCustomRecords {
         [object]$LoginSess
     )
     
-    $pieces = $Identifier.Split(".")
-    for ($i=1; $i -lt ($pieces.Count-1); $i++) {
-        $topdomain = "$( $pieces[$i..($pieces.Count-1)] -join '.' )"
-    }
-    if (([String]::IsNullOrWhiteSpace($topdomain))) {
-        $topdomain = $Identifier
-    } 
     $url = "$apiroot/api/domains/$topdomain/dns/custom_records"
-    Write-Host $url
+    Write-Debug $url
     try {        
-        $webrequest = Invoke-WebRequest -Uri $url -Method Default -WebSession $LoginSess -UseBasicParsing
-        $StatusCode = $webrequest.StatusCode
+        $webrequest = Invoke-WebRequest -Uri $url -Method Default -WebSession $LoginSess -UseBasicParsing -ErrorAction Stop
     }
-    catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
+    catch [System.Net.WebException] { 
+        Write-Verbose "An exception was caught: $($_.Exception.Message)"
+        $_.Exception.Response
     } 
-    $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_records.txt"
     $jsonObj = ConvertFrom-Json $webrequest.content
     return $jsonObj.result.data
 }
@@ -189,11 +226,11 @@ function Find-RecordId {
 
 function DecryptCred {
 
-    if (!(Test-Path "${env:\userprofile}\GDNS.dat"))  {
+    if (!(Test-Path "${env:\userprofile}\One.com.dat"))  {
         throw "Login and password not set (run with option setcred to set them."
     }
 
-    $Credential = Import-CliXml -Path "${env:\userprofile}\GDNS.dat"
+    $Credential = Import-CliXml -Path "${env:\userprofile}\One.com.dat"
 
 
     return $Credential
@@ -203,13 +240,10 @@ function onedotcom_login {
 
     $SearchString = '<form id="kc-form-login" class="Login-form login autofill" onsubmit="login.disabled = true; return true;" action="'
 
-    #$odcCred = DecryptCred
+    $odcCred = DecryptCred
 
-    #$usr = $odcCred.UserName
-    #$pwd = $odcCred.GetNetworkCredential().Password
-
-    $usr = 'hostmaster@jumbogris.dk'
-    $pwd = '7zH%.!WbN@&uU*2'
+    $usr = $odcCred.UserName
+    $pwd = $odcCred.GetNetworkCredential().Password
     
     if (([String]::IsNullOrWhiteSpace($usr)) -or ([String]::IsNullOrWhiteSpace($pwd)))  {
         throw "Login and/or password are not set correctly. Reissue with option setcred"
@@ -218,64 +252,65 @@ function onedotcom_login {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
    
     try {
-        $webrequest = Invoke-WebRequest -Uri $apiRoot -Method Default -SessionVariable websession -UseBasicParsing
-        $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_before.txt"
+        $webrequest = Invoke-WebRequest -Uri $apiRoot -Method Default -SessionVariable websession -UseBasicParsing -ErrorAction Stop
         $pos = $webrequest.content.LastIndexOf($SearchString) + $SearchString.Length 
         $resulttxt = $webrequest.content.Substring($pos)
     }
-    catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
+    catch [System.Net.WebException] { 
+        Write-Verbose "An exception was caught: $($_.Exception.Message)"
+        $_.Exception.Response
     }
 
     try { 
         $pos = $resulttxt.IndexOf('"')
         $LoginUrl = $resulttxt.Substring(0, $pos)
         $LoginUrl = $LoginUrl.replace('&amp;','&')
-        $LoginUrl | Out-File -FilePath "C:\Users\Programmering\Desktop\output_login.txt"
         $formFields = @{username=$usr;password=$pwd;credentialId=''}
 
-        $webrequest = Invoke-WebRequest -Uri $LoginUrl -Body $formFields -WebSession $websession -Method POST -UseBasicParsing
-        $webrequest.content | Out-File -FilePath "C:\Users\Programmering\Desktop\output_after.txt"
-        #$webrequest.StatusDescriptionOK
+        $webrequest = Invoke-WebRequest -Uri $LoginUrl -Body $formFields -WebSession $websession -Method POST -UseBasicParsing -ErrorAction Stop
     }
-    catch {
-        $StatusCode = $_.Exception.Response.StatusCode.value__
+    catch [System.Net.WebException] { 
+        Write-Verbose "An exception was caught: $($_.Exception.Message)"
+        $_.Exception.Response
     }
     Remove-Variable usr, pwd
 
     return $websession
 }
 
+############################
+# Main program
+############################
 
-$zone = 'jumbogris.dk'
-$sess = onedotcom_login
-#Add-DnsRecord $zone "_acme-challenge.test" "tokenid" $Sess
-#Remove-DnsRecord $zone "_acme-challenge.test" "tokenid" $Sess
-
-<#
-$action = $args[0]
-if($action -eq "create") {
-	$zone = $args[1]
-    $name = $args[2]
-    $text = $args[3]
-    $terms = $true
-    if($args[4] -eq "DeclineTerms") {
-        $terms = $false
+$ProgressPreference = 'SilentlyContinue'
+switch ($action) {
+    "create" {
+        if (!([String]::IsNullOrWhiteSpace($Identifier)) -and !([String]::IsNullOrWhiteSpace($RecordName)) -and !([String]::IsNullOrWhiteSpace($Token))) {
+                $sess = onedotcom_login
+                Add-DnsRecord $Identifier $RecordName $Token $Sess
+        }
+        else {
+            Write-Error "Argument(s) Identifier, RecordName and/or Token were not applied!"
+        }  
     }
-	Add-DnsTxtGDNS $zone $name $text $terms
-}elseif($action -eq "delete") {
-	$zone = $args[1]
-    $name = $args[2]
-    $text = $args[3]
-    $terms = $true
-    if($args[4] -eq "DeclineTerms") {
-        $terms = $false
+    "delete" {
+        if (!([String]::IsNullOrWhiteSpace($Identifier)) -and !([String]::IsNullOrWhiteSpace($RecordName)) -and !([String]::IsNullOrWhiteSpace($Token))) {
+            $sess = onedotcom_login
+            Remove-DnsRecord $Identifier $RecordName $Token $Sess
+        }
+        else {
+            Write-Error "Argument(s) Identifier, RecordName and/or Token were not applied!"
+        }    
     }
-	Remove-DnsTxtGDNS $zone $name $text $terms
-}elseif($action -eq "setcred") {
-    EncryptCred
+    "setcred" {
+        EncryptCred
+    }
+    Default {
+        Write-Error "No or wrong arguments were passed. Valid arguments are create, delete and setcred.`n
+        Syntax:`n
+        onedotcom.ps1 create <Identifier> <RecordName> <Token>`n
+        onedotcom.ps1 delete <Identifier> <RecordName> <Token>`n
+        onedotcom.ps1 setcred (Set the credentials for one.com)"
+    }
+    
 }
-else {
-    Write-Verbose "No arguments given. Please see documentation."
-}
-#>
