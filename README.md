@@ -1,5 +1,5 @@
-# win-acme dns api for danish DNS provider gratisdns.dk
-win-acme_dns_GratisDNS
+# win-acme dns api for DNS provider one.com
+win-acme_dns_one.com
 
 **Author:** Morten Hansen
 
@@ -49,4 +49,3 @@ Example in settings.json file:
 #### Information on using WACS
 
 Please see win-acme website found at https://www.win-acme.com
- 
