@@ -15,6 +15,9 @@ This is a dns api for use with [wacs](https://win-acme.com) that uses Let's Encr
 It enables you to automatically update one.com dns-records for
 your domains hosted on their dns servers.
 
+### Web Ciphers
+Please ensure you got the ciphers needed to access one.com webpage. 
+Ciphers should default from Windows Server 2016 and above but only tested with Windows Server 2019 and 2022. 
 
 ### Instructions
 
