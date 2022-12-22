@@ -6,6 +6,7 @@ win-acme_dns_one.com
 **Repository:** https://github.com/morhans/win-acme_dns_one.com
 
 ### Disclaimer
+**I have switched DNS provider and can no longer garentee this script is working, as one.com can change their website.**
 
 Not that versed in powershell scripts. So, any ideas and better ways of doing things is welcome.
 
